@@ -12,8 +12,18 @@ def main():
     parser = argparse.ArgumentParser( description = 'Photo archive tool' )
     commands = parser.add_subparsers( required = True, help = 'available commands' )
 
-    findParser = commands.add_parser( 'find' )
-    findParser.set_defaults( execute = find )
+    configureFindCommand( commands.add_parser( 'find' ) )
+    configureIndexCommand( commands.add_parser( 'index' ) )
+
+    cmdArgs = parser.parse_args()
+    return cmdArgs.execute( cmdArgs )
+
+
+FindActionType = Callable[[pathlib.Path, pathlib.Path, FileDb.FileInfo], None]
+
+
+def configureFindCommand( findParser: argparse.ArgumentParser ):
+    findParser.set_defaults( execute = findCmdMain )
     findParser.add_argument( '--db', required = True, help = 'photo database' )
     findActionGroup = findParser.add_mutually_exclusive_group()
     findParser.set_defaults( findAction = None )
@@ -28,14 +38,8 @@ def main():
     findParser.add_argument( 'FILES', nargs = argparse.REMAINDER,
                              help = 'files or folders to find' )
 
-    cmdArgs = parser.parse_args()
-    cmdArgs.execute( cmdArgs )
 
-
-FindActionType = Callable[[pathlib.Path, pathlib.Path, FileDb.FileInfo], None]
-
-
-def find( cmdArgs ):
+def findCmdMain( cmdArgs ):
     dbPath = pathlib.Path( cmdArgs.db )
     db = FileDb.FileDb()
     db.addIndexedTree( dbPath )
@@ -146,6 +150,86 @@ class CopyNewFindAction:
         print( f"cp {filePath} {targetPath}" )
 
 
+def configureIndexCommand( indexParser: argparse.ArgumentParser ):
+    indexParser.set_defaults( execute = indexCmdMain )
+    indexActionGroup = indexParser.add_mutually_exclusive_group()
+    indexParser.set_defaults( indexAction = verifyIndexAction )
+    indexActionGroup.add_argument( '--create', help = 'create SHA2 file checksum index',
+                                   action = 'store_const', dest = 'indexAction', const = createIndexAction )
+    indexActionGroup.add_argument( '--verify', help = 'create file checksum index',
+                                   action = 'store_const', dest = 'indexAction', const = verifyIndexAction )
+    indexParser.add_argument( '--checksum-file', help = 'checksum file',
+                              dest = 'checksumFile', default = 'Checksums.sha2' )
+    indexParser.add_argument( 'FOLDERS', nargs = argparse.REMAINDER, help = 'folders to index' )
+
+
+def indexCmdMain( cmdArgs ):
+    action = cmdArgs.indexAction
+
+    fileTreeIterator = FileDb.FileTreeIterator()
+    fileTreeIterator.addExcluded( '*.sha[12]', 'Thumbs.db' )
+
+    checksumFile = pathlib.Path( cmdArgs.checksumFile )
+    if len( cmdArgs.FOLDERS ) > 1 and checksumFile.is_absolute():
+        raise ValueError( 'absolute path to checksum file is given and multiple folders specified' )
+
+    ok = True
+    for folder in cmdArgs.FOLDERS:
+        if not action( checksumFile, pathlib.Path( folder ), fileTreeIterator ):
+            ok = False
+
+    return 0 if ok else 1
+
+
+def createIndexAction( checksumFile: pathlib.Path, folder: pathlib.Path, fileTreeIterator: FileDb.FileTreeIterator ):
+    with FileDb.ChecksumFileWriter( folder.joinpath( checksumFile ) ) as writer:
+        for filePath in sorted( fileTreeIterator.iterate( folder ) ):
+            writer.write( filePath, FileDb.calculateChecksum( folder.joinpath( filePath ) ) )
+
+        writer.close()
+
+    return True
+
+
+def verifyIndexAction( checksumFile: pathlib.Path, folder: pathlib.Path, fileTreeIterator: FileDb.FileTreeIterator ):
+    fileSet = set()
+    for filePath in fileTreeIterator.iterate( folder ):
+        fileSet.add( filePath )
+
+    missingCount = 0
+    damagedCount = 0
+    algorithm = None
+    with FileDb.ChecksumFileReader( folder.joinpath( checksumFile ) ) as reader:
+        for fp, c in reader:
+            if algorithm is None:
+                if len( c ) == 40:
+                    algorithm = 'sha1'
+                else:
+                    algorithm = 'sha256'
+
+            filePath = folder.joinpath( fp )
+            if fp not in fileSet:
+                missingCount += 1
+                print( filePath.as_posix(), 'missing' )
+            else:
+                fileSet.remove( fp )
+                if FileDb.calculateChecksum( filePath, algorithm ) != c:
+                    damagedCount += 1
+                    print( filePath, 'damaged' )
+
+    newCount = len( fileSet )
+    if newCount > 0:
+        for fp in sorted( fileSet ):
+            print( folder.joinpath( fp ).as_posix(), 'new' )
+
+    if newCount > 0 or missingCount > 0 or damagedCount > 0:
+        print( f'{folder.as_posix()}: damaged = {damagedCount}, missing = {missingCount}, new = {newCount}' )
+        return False
+
+    print( f'{folder.as_posix()}: OK' )
+    return True
+
+
 if __name__ == "__main__":
     # execute only if run as a script
-    main()
+    exit( main() or 0 )

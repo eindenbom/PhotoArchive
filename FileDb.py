@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
+import fnmatch
 import hashlib
 import pathlib
+import re
+from collections import deque
 from os import scandir
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Pattern, Union
 
 
 class FileInfo:
@@ -71,32 +74,12 @@ class FileDb:
             prevInfo.duplicate = fileInfo
 
     def addChecksumFile( self, basePath: Optional[pathlib.Path], fileName: pathlib.Path ):
-        with fileName.open( mode = 'rt', encoding = 'utf-8' ) as file:
-            no = 0
-            while True:
-                l = file.readline()
-                if l == '':
-                    break
-
-                no += 1
-                l = l.rstrip( '\r\n' )
-                if l == '':
-                    continue
-
-                c, s, n = l.partition( ' ' )
-                if n != '' and (n[0] == '*' or n[0] == ' '):
-                    n = n[1:]
-
-                if s == '' or n == '':
-                    raise ValueError( 'Invalid checksum line #{no} in {fileName}' )
-
-                fp = pathlib.Path( n )
+        with ChecksumFileReader( fileName ) as reader:
+            for fp, c in reader:
                 if basePath is not None:
                     fp = basePath.joinpath( fp )
 
                 self.addFile( fp, c )
-
-            file.close()
 
     def addIndexedTree( self, basePath: pathlib.Path ):
         for indexFileName in ('Checksums.sha2', 'Checksums.sha1'):
@@ -131,28 +114,121 @@ class FileDb:
 
     def __findFileInfoChain( self, filePath: pathlib.Path ):
         if self.hasSHA256:
-            fileInfo = self.get( self.calculateChecksum( filePath, 'sha256' ) )
+            fileInfo = self.get( calculateChecksum( filePath, 'sha256' ) )
             if fileInfo is not None:
                 return fileInfo
 
         if self.hasSHA1:
-            fileInfo = self.get( self.calculateChecksum( filePath, 'sha1' ) )
+            fileInfo = self.get( calculateChecksum( filePath, 'sha1' ) )
             if fileInfo is not None:
                 return fileInfo
 
         return None
 
-    @staticmethod
-    def calculateChecksum( filePath: pathlib.Path, algorithm: str ):
-        h = hashlib.new( algorithm )
-        with filePath.open( mode = 'rb', buffering = False ) as file:
-            while True:
-                data = file.read( 0x10000 )
-                if len( data ) == 0:
-                    break
 
-                h.update( data )
+def calculateChecksum( filePath: pathlib.Path, algorithm: str = 'sha256' ):
+    h = hashlib.new( algorithm )
+    with filePath.open( mode = 'rb', buffering = False ) as file:
+        while True:
+            data = file.read( 0x10000 )
+            if len( data ) == 0:
+                break
 
-            file.close()
+            h.update( data )
 
-        return h.hexdigest()
+        file.close()
+
+    return h.hexdigest()
+
+
+class FileTreeIterator:
+    __excluded: List[Pattern]
+
+    def __init__( self ):
+        self.__excluded = []
+
+    def addExcluded( self, *glob: str ):
+        for g in glob:
+            self.__excluded.append(
+                re.compile( fnmatch.translate( g ),
+                            re.RegexFlag.IGNORECASE | re.RegexFlag.DOTALL ) )
+
+    def iterate( self, basePath: pathlib.Path ):
+        subdirQueue = deque()
+        subdir = pathlib.Path()
+        while True:
+            for dirEntry in scandir( basePath.joinpath( subdir ) ):
+                filePath = subdir.joinpath( dirEntry.name )
+                if dirEntry.is_dir():
+                    subdirQueue.append( filePath )
+                elif self.__checkName( dirEntry.name ):
+                    yield filePath
+
+            if len( subdirQueue ) == 0:
+                break
+
+            subdir = subdirQueue.popleft()
+
+    def __checkName( self, name: str ):
+        for e in self.__excluded:
+            if e.match( name ):
+                return False
+
+        return True
+
+
+class ChecksumFileReader:
+    def __init__( self, filePath: Union[str, pathlib.PurePath] ):
+        self.__file = open( filePath, mode = 'rt', encoding = 'utf-8' )
+        self.__lineNo = 0
+
+    def __enter__( self ):
+        return self
+
+    def __exit__( self, exc_type, exc_val, exc_tb ):
+        self.close()
+
+    def close( self ):
+        self.__file.close()
+
+    def __iter__( self ):
+        return self
+
+    def __next__( self ):
+        while True:
+            l = self.__file.readline()
+            if l == '':
+                raise StopIteration
+
+            self.__lineNo += 1
+            l = l.rstrip( '\r\n' )
+            if l == '':
+                continue
+
+            c, s, n = l.partition( ' ' )
+            if n != '' and (n[0] == '*' or n[0] == ' '):
+                n = n[1:]
+
+            if s == '' or n == '':
+                lineNo = self.__lineNo
+                fileName = self.__file.name
+                raise ValueError( f'Invalid checksum line #{lineNo} in {fileName}' )
+
+            return pathlib.Path( n ), c
+
+
+class ChecksumFileWriter:
+    def __init__( self, filePath: Union[str, pathlib.PurePath] ):
+        self.__file = open( filePath, mode = 'wt', encoding = 'utf-8' )
+
+    def __enter__( self ):
+        return self
+
+    def __exit__( self, exc_type, exc_val, exc_tb ):
+        self.close()
+
+    def close( self ):
+        self.__file.close()
+
+    def write( self, filePath: pathlib.PurePath, checksum: str ):
+        print( checksum, ' *./', filePath.as_posix(), file = self.__file, sep = '' )
