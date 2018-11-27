@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import argparse
 import pathlib
+import shutil
 import stat
 from os import scandir
 from typing import Callable, Set
@@ -139,14 +140,21 @@ class MoveFoundFindAction:
 class CopyNewFindAction:
     def __init__( self, target: pathlib.Path ):
         self.__target = target
-        self.__cache = MkDirCache()
+        self.__dirCache = MkDirCache()
 
     def __call__( self, basePath: pathlib.Path, filePath: pathlib.Path, fileInfo: FileDb.FileInfo ):
         if fileInfo is not None:
             return
 
         targetPath = self.__target.joinpath( filePath.relative_to( basePath ) )
-        print( f"cp {filePath} {targetPath}" )
+
+        self.__dirCache.mkdir( targetPath.parent )
+        if targetPath.exists():
+            print( f"skipping {filePath}, target ({targetPath}) already exists" )
+            return
+
+        # noinspection PyTypeChecker
+        shutil.copy2( filePath, targetPath )
 
 
 def configureIndexCommand( indexParser: argparse.ArgumentParser ):
