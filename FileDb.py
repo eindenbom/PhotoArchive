@@ -82,16 +82,20 @@ class FileDb:
                 self.addFile( fp, c )
 
     def addIndexedTree( self, basePath: pathlib.Path ):
+        self.__addIndexedTree( basePath, pathlib.Path() )
+
+    def __addIndexedTree( self, basePath: pathlib.Path, relativePath: pathlib.Path ):
+        folderPath = basePath.joinpath( relativePath )
         for indexFileName in ('Checksums.sha2', 'Checksums.sha1'):
-            indexFilePath = basePath.joinpath( indexFileName )
+            indexFilePath = folderPath.joinpath( indexFileName )
             if indexFilePath.exists():
-                self.addChecksumFile( basePath, indexFilePath )
+                self.addChecksumFile( relativePath, indexFilePath )
                 return
 
-        with scandir( basePath ) as it:
+        with scandir( folderPath ) as it:
             for fileEntry in it:
                 if fileEntry.is_dir():
-                    self.addIndexedTree( basePath.joinpath( fileEntry.name ) )
+                    self.__addIndexedTree( basePath, relativePath.joinpath( fileEntry.name ) )
 
     def get( self, checksum: str ):
         return self.__hashIndex.get( checksum, None )

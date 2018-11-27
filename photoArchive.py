@@ -24,7 +24,7 @@ FindActionType = Callable[[pathlib.Path, pathlib.Path, FileDb.FileInfo], None]
 
 def configureFindCommand( findParser: argparse.ArgumentParser ):
     findParser.set_defaults( execute = findCmdMain )
-    findParser.add_argument( '--db', required = True, help = 'photo database' )
+    findParser.add_argument( '--db', required = True, action = 'append', help = 'photo database' )
     findActionGroup = findParser.add_mutually_exclusive_group()
     findParser.set_defaults( findAction = None )
     findActionGroup.add_argument( '--print', help = 'print files and storage location',
@@ -40,14 +40,14 @@ def configureFindCommand( findParser: argparse.ArgumentParser ):
 
 
 def findCmdMain( cmdArgs ):
-    dbPath = pathlib.Path( cmdArgs.db )
     db = FileDb.FileDb()
-    db.addIndexedTree( dbPath )
+    for dbPath in cmdArgs.db:
+        db.addIndexedTree( pathlib.Path( dbPath ) )
 
     action = cmdArgs.findAction
     if action is None:
         if cmdArgs.moveFoundTarget is not None:
-            action = MoveFoundFindAction( pathlib.Path( cmdArgs.moveFoundTarget ), dbPath )
+            action = MoveFoundFindAction( pathlib.Path( cmdArgs.moveFoundTarget ) )
         elif cmdArgs.copyNewTarget is not None:
             action = CopyNewFindAction( pathlib.Path( cmdArgs.copyNewTarget ) )
         else:
@@ -115,16 +115,15 @@ class MkDirCache:
 class MoveFoundFindAction:
     __sourceDirs: Set[pathlib.Path]
 
-    def __init__( self, target: pathlib.Path, dbPath: pathlib.Path ):
+    def __init__( self, target: pathlib.Path ):
         self.__target = target
-        self.__dbPath = dbPath
         self.__dirCache = MkDirCache()
 
     def __call__( self, basePath: pathlib.Path, filePath: pathlib.Path, fileInfo: FileDb.FileInfo ):
         if fileInfo is None:
             return
 
-        targetPath = self.__target.joinpath( fileInfo.filePath.relative_to( self.__dbPath ) )
+        targetPath = self.__target.joinpath( fileInfo.filePath )
         if filePath.name.lower() != targetPath.name.lower():
             print( f"skipping {filePath}, target name mismatch ({targetPath.name})" )
             return
