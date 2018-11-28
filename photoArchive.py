@@ -3,7 +3,6 @@ import argparse
 import pathlib
 import shutil
 import stat
-from os import scandir
 from typing import Callable, Set
 
 import FileDb
@@ -18,6 +17,12 @@ def main():
 
     cmdArgs = parser.parse_args()
     return cmdArgs.execute( cmdArgs )
+
+
+def createFileTreeIterator( _cmdArgs ):
+    iterator = FileDb.FileTreeIterator()
+    iterator.addExcluded( '*.sha[12]', 'Thumbs.db' )
+    return iterator
 
 
 FindActionType = Callable[[pathlib.Path, pathlib.Path, FileDb.FileInfo], None]
@@ -55,8 +60,9 @@ def findCmdMain( cmdArgs ):
             action = printFindAction
 
     cmd = FindCommand( action = action, db = db )
+    fileTreeIterator = createFileTreeIterator( cmdArgs )
     for filePath in cmdArgs.FILES:
-        cmd.process( pathlib.Path( filePath ) )
+        cmd.process( pathlib.Path( filePath ), fileTreeIterator )
 
 
 class FindCommand:
@@ -64,23 +70,16 @@ class FindCommand:
         self.__db = db
         self.__action = action
 
-    def process( self, filePath: pathlib.Path ):
+    def process( self, filePath: pathlib.Path, fileTreeIterator: FileDb.FileTreeIterator ):
         s = filePath.stat()
         if not stat.S_ISDIR( s.st_mode ):
             self.processFile( filePath.parent, filePath )
         else:
-            self.processDir( filePath, filePath )
-
-    def processDir( self, basePath: pathlib.Path, dirPath: pathlib.Path ):
-        for dirEntry in sorted( scandir( dirPath ), key = lambda x: x.name.lower() ):
-            filePath = dirPath.joinpath( dirEntry.name )
-            if dirEntry.is_dir():
-                self.processDir( basePath, filePath )
-            else:
-                self.processFile( basePath, filePath )
+            for relativePath in fileTreeIterator.iterate( filePath, sortFolders = True ):
+                self.processFile( filePath, relativePath )
 
     def processFile( self, basePath: pathlib.Path, filePath: pathlib.Path ):
-        self.__action( basePath, filePath, self.__db.findFile( filePath ) )
+        self.__action( basePath, filePath, self.__db.findFile( basePath.joinpath( filePath ) ) )
 
 
 def printFindAction( _basePath: pathlib.Path, filePath: pathlib.Path, fileInfo: FileDb.FileInfo ):
@@ -173,8 +172,7 @@ def configureIndexCommand( indexParser: argparse.ArgumentParser ):
 def indexCmdMain( cmdArgs ):
     action = cmdArgs.indexAction
 
-    fileTreeIterator = FileDb.FileTreeIterator()
-    fileTreeIterator.addExcluded( '*.sha[12]', 'Thumbs.db' )
+    fileTreeIterator = createFileTreeIterator( cmdArgs )
 
     checksumFile = pathlib.Path( cmdArgs.checksumFile )
     if len( cmdArgs.FOLDERS ) > 1 and checksumFile.is_absolute():

@@ -157,11 +157,14 @@ class FileTreeIterator:
                 re.compile( fnmatch.translate( g ),
                             re.RegexFlag.IGNORECASE | re.RegexFlag.DOTALL ) )
 
-    def iterate( self, basePath: pathlib.Path ):
+    def iterate( self, basePath: pathlib.Path, *, sortFolders: bool = False ):
         subdirQueue = deque()
         subdir = pathlib.Path()
         while True:
-            for dirEntry in scandir( basePath.joinpath( subdir ) ):
+            dirIterator = scandir( basePath.joinpath( subdir ) )
+            if sortFolders:
+                dirIterator = sorted( dirIterator, key = lambda x: x.name.lower() )
+            for dirEntry in dirIterator:
                 filePath = subdir.joinpath( dirEntry.name )
                 if dirEntry.is_dir():
                     subdirQueue.append( filePath )
