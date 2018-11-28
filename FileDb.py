@@ -203,7 +203,12 @@ class ChecksumFileReader:
 
     def __next__( self ):
         while True:
-            l = self.__file.readline()
+            try:
+                l = self.__file.readline()
+            except UnicodeDecodeError as e:
+                fileName = self.__file.name
+                raise IOError( f'{fileName}: {e}' ) from e
+
             if l == '':
                 raise StopIteration
 
