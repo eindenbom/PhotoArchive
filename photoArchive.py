@@ -59,23 +59,24 @@ def findCmdMain( cmdArgs ):
         else:
             action = printFindAction
 
-    cmd = FindCommand( action = action, db = db )
-    fileTreeIterator = createFileTreeIterator( cmdArgs )
+    cmd = FindCommand( action = action, db = db,
+                       fileTreeIterator = createFileTreeIterator( cmdArgs ) )
     for filePath in cmdArgs.FILES:
-        cmd.process( pathlib.Path( filePath ), fileTreeIterator )
+        cmd.process( pathlib.Path( filePath ) )
 
 
 class FindCommand:
-    def __init__( self, *, action: FindActionType, db: FileDb.FileDb ):
+    def __init__( self, *, action: FindActionType, db: FileDb.FileDb, fileTreeIterator: FileDb.FileTreeIterator ):
         self.__db = db
         self.__action = action
+        self.__fileTreeIterator = fileTreeIterator
 
-    def process( self, filePath: pathlib.Path, fileTreeIterator: FileDb.FileTreeIterator ):
+    def process( self, filePath: pathlib.Path ):
         s = filePath.stat()
         if not stat.S_ISDIR( s.st_mode ):
             self.processFile( filePath.parent, filePath )
         else:
-            for relativePath in fileTreeIterator.iterate( filePath, sortFolders = True ):
+            for relativePath in self.__fileTreeIterator.iterate( filePath, sortFolders = True ):
                 self.processFile( filePath, relativePath )
 
     def processFile( self, basePath: pathlib.Path, filePath: pathlib.Path ):
