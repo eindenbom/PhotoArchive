@@ -3,6 +3,7 @@ import argparse
 import pathlib
 import shutil
 import stat
+from sys import stderr
 from typing import Callable, Set
 
 import FileDb
@@ -160,80 +161,58 @@ class CopyNewFindAction:
 def configureIndexCommand( indexParser: argparse.ArgumentParser ):
     indexParser.set_defaults( execute = indexCmdMain )
     indexActionGroup = indexParser.add_mutually_exclusive_group()
-    indexParser.set_defaults( indexAction = verifyIndexAction )
+    indexParser.set_defaults( indexAction = 'verify' )
     indexActionGroup.add_argument( '--create', help = 'create SHA2 file checksum index',
-                                   action = 'store_const', dest = 'indexAction', const = createIndexAction )
-    indexActionGroup.add_argument( '--verify', help = 'create file checksum index',
-                                   action = 'store_const', dest = 'indexAction', const = verifyIndexAction )
+                                   action = 'store_const', dest = 'indexAction', const = 'create' )
+    indexActionGroup.add_argument( '--update', help = 'update SHA2 file checksum index',
+                                   action = 'store_const', dest = 'indexAction', const = 'update' )
+    indexActionGroup.add_argument( '--verify', help = 'verify file checksum index',
+                                   action = 'store_const', dest = 'indexAction', const = 'verify' )
     indexParser.add_argument( '--checksum-file', help = 'checksum file',
-                              dest = 'checksumFile', default = 'Checksums.sha2' )
+                              dest = 'checksumFile', default = None )
+    indexParser.add_argument( '--changes-mode', help = 'context changes handling mode',
+                              choices = ['reject', 'review', 'accept'], default = 'reject',
+                              dest = 'changesMode' )
     indexParser.add_argument( 'FOLDERS', nargs = argparse.REMAINDER, help = 'folders to index' )
 
 
 def indexCmdMain( cmdArgs ):
-    action = cmdArgs.indexAction
+    if cmdArgs.checksumFile is not None:
+        indexFileName = pathlib.Path( cmdArgs.checksumFile )
+    else:
+        indexFileName = None
+    folders = cmdArgs.FOLDERS
+
+    if len( folders ) > 1 and indexFileName.is_absolute():
+        raise ValueError( 'absolute path to checksum file is given and multiple folders specified' )
+
+    if len( folders ) == 0:
+        folders = ['.']
 
     fileTreeIterator = createFileTreeIterator( cmdArgs )
 
-    checksumFile = pathlib.Path( cmdArgs.checksumFile )
-    if len( cmdArgs.FOLDERS ) > 1 and checksumFile.is_absolute():
-        raise ValueError( 'absolute path to checksum file is given and multiple folders specified' )
+    create = cmdArgs.indexAction != 'verify'
+    verify = cmdArgs.indexAction != 'create'
 
-    ok = True
-    for folder in cmdArgs.FOLDERS:
-        if not action( checksumFile, pathlib.Path( folder ), fileTreeIterator ):
-            ok = False
+    rejectChanges = create and cmdArgs.changesMode == 'reject'
+    reviewChanges = create and cmdArgs.changesMode == 'review'
 
-    return 0 if ok else 1
+    success = True
+    try:
+        for folder in folders:
+            indexBuilder = FileDb.IndexBuilder( folder = pathlib.Path( folder ), indexFileName = indexFileName,
+                                                fileTreeIterator = fileTreeIterator,
+                                                create = create, verify = verify,
+                                                rejectChanges = rejectChanges, reviewChanges = reviewChanges )
 
+            if not indexBuilder.run():
+                success = False
 
-def createIndexAction( checksumFile: pathlib.Path, folder: pathlib.Path, fileTreeIterator: FileDb.FileTreeIterator ):
-    with FileDb.ChecksumFileWriter( folder.joinpath( checksumFile ) ) as writer:
-        for filePath in sorted( fileTreeIterator.iterate( folder ) ):
-            writer.write( filePath, FileDb.calculateChecksum( folder.joinpath( filePath ) ) )
+    except FileDb.IndexValidationError as e:
+        print( e, file = stderr )
+        return 2
 
-        writer.close()
-
-    return True
-
-
-def verifyIndexAction( checksumFile: pathlib.Path, folder: pathlib.Path, fileTreeIterator: FileDb.FileTreeIterator ):
-    fileSet = set()
-    for filePath in fileTreeIterator.iterate( folder ):
-        fileSet.add( filePath )
-
-    missingCount = 0
-    damagedCount = 0
-    algorithm = None
-    with FileDb.ChecksumFileReader( folder.joinpath( checksumFile ) ) as reader:
-        for fp, c in reader:
-            if algorithm is None:
-                if len( c ) == 40:
-                    algorithm = 'sha1'
-                else:
-                    algorithm = 'sha256'
-
-            filePath = folder.joinpath( fp )
-            if fp not in fileSet:
-                missingCount += 1
-                print( filePath.as_posix(), 'missing' )
-            else:
-                fileSet.remove( fp )
-                if FileDb.calculateChecksum( filePath, algorithm ) != c:
-                    damagedCount += 1
-                    print( filePath, 'damaged' )
-
-    newCount = len( fileSet )
-    if newCount > 0:
-        for fp in sorted( fileSet ):
-            print( folder.joinpath( fp ).as_posix(), 'new' )
-
-    if newCount > 0 or missingCount > 0 or damagedCount > 0:
-        print( f'{folder.as_posix()}: damaged = {damagedCount}, missing = {missingCount}, new = {newCount}' )
-        return False
-
-    print( f'{folder.as_posix()}: OK' )
-    return True
+    return 0 if success else 1
 
 
 if __name__ == "__main__":
