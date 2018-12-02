@@ -4,7 +4,7 @@ import pathlib
 import shutil
 import stat
 from sys import stderr
-from typing import Callable, Set
+from typing import Callable, Set, Dict
 
 import FileDb
 
@@ -42,6 +42,8 @@ def configureFindCommand( findParser: argparse.ArgumentParser ):
                                   dest = 'moveFoundTarget', default = None )
     findActionGroup.add_argument( '--copy-new-to', help = 'copy new files to folder',
                                   dest = 'copyNewTarget', default = None )
+    findParser.add_argument( '--cached-checksums', dest = 'cachedChecksums',
+                             help = 'file with cached checksums' )
     findParser.add_argument( 'FILES', nargs = argparse.REMAINDER,
                              help = 'files or folders to find' )
 
@@ -62,15 +64,38 @@ def findCmdMain( cmdArgs ):
 
     cmd = FindCommand( action = action, db = db,
                        fileTreeIterator = createFileTreeIterator( cmdArgs ) )
-    for filePath in cmdArgs.FILES:
-        cmd.process( pathlib.Path( filePath ) )
+
+    cachedChecksums = cmdArgs.cachedChecksums
+    if cachedChecksums is not None:
+        cachedChecksums = pathlib.Path( cachedChecksums )
+
+    files = cmdArgs.FILES
+    if len( files ) == 0 and cachedChecksums is not None:
+        cmd.processChecksumFile( cachedChecksums )
+    else:
+        if len( files ) == 0:
+            files = ['.']
+
+        if cachedChecksums is not None:
+            cmd.addCachedChecksums( cachedChecksums )
+
+        for filePath in files:
+            cmd.process( pathlib.Path( filePath ) )
 
 
 class FindCommand:
+    __cachedChecksums: Dict[pathlib.Path, str]
+
     def __init__( self, *, action: FindActionType, db: FileDb.FileDb, fileTreeIterator: FileDb.FileTreeIterator ):
         self.__db = db
         self.__action = action
         self.__fileTreeIterator = fileTreeIterator
+        self.__cachedChecksums = dict()
+
+    def addCachedChecksums( self, checksumFile: pathlib.Path ):
+        with FileDb.ChecksumFileReader( checksumFile ) as reader:
+            for fp, c in reader:
+                self.__cachedChecksums[fp] = c
 
     def process( self, filePath: pathlib.Path ):
         s = filePath.stat()
@@ -81,7 +106,26 @@ class FindCommand:
                 self.processFile( filePath, relativePath )
 
     def processFile( self, basePath: pathlib.Path, filePath: pathlib.Path ):
-        self.__action( basePath, filePath, self.__db.findFile( basePath.joinpath( filePath ) ) )
+        self.__action( basePath, filePath, self.__findFile( basePath, filePath ) )
+
+    def processChecksumFile( self, cachedChecksums: pathlib.Path ):
+        with FileDb.ChecksumFileReader( cachedChecksums ) as reader:
+            basePath = pathlib.Path()
+            for fp, c in reader:
+                self.__action( basePath, fp, self.__findFileByChecksum( fp, c ) )
+
+    def __findFile( self, basePath: pathlib.Path, filePath: pathlib.Path ):
+        cachedChecksum = self.__cachedChecksums.get( filePath, None )
+        if cachedChecksum is None:
+            return self.__db.findFile( basePath.joinpath( filePath ) )
+        else:
+            return self.__findFileByChecksum( filePath, cachedChecksum )
+
+    def __findFileByChecksum( self, filePath: pathlib.Path, checksum: str ):
+        fileInfo = self.__db.get( checksum )
+        if fileInfo is not None:
+            fileInfo = fileInfo.findBestMatch( filePath )
+        return fileInfo
 
 
 def printFindAction( _basePath: pathlib.Path, filePath: pathlib.Path, fileInfo: FileDb.FileInfo ):

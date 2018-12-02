@@ -39,6 +39,22 @@ class FileInfo:
     def duplicate( self, other: "FileInfo" ):
         self.__duplicate = other
 
+    def findBestMatch( self, filePath: pathlib.Path ):
+        if self.duplicate is None:
+            return self
+
+        # есть файлы с одинаковой чек-суммой, ищем первый совпадающий по имени
+        fileName = filePath.name.lower()
+
+        f = self
+        while f is not None:
+            if f.filePath.name.lower() == fileName:
+                return f
+
+            f = f.duplicate
+
+        return self
+
 
 class FileDb:
     __hashIndex: Dict[str, FileInfo]
@@ -105,17 +121,8 @@ class FileDb:
 
     def findFile( self, filePath: pathlib.Path ):
         fileInfo = self.__findFileInfoChain( filePath )
-
-        if fileInfo is not None and fileInfo.duplicate is not None:
-            # есть файлы с одинаковой чек-суммой, ищем первый совпадающий по имени
-            fileName = filePath.name.lower()
-
-            f = fileInfo
-            while f is not None:
-                if f.filePath.name.lower() == fileName:
-                    return f
-
-                f = f.duplicate
+        if fileInfo is not None:
+            fileInfo = fileInfo.findBestMatch( filePath )
 
         return fileInfo
 
