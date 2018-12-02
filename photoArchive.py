@@ -31,7 +31,8 @@ FindActionType = Callable[[pathlib.Path, pathlib.Path, FileDb.FileInfo], None]
 
 def configureFindCommand( findParser: argparse.ArgumentParser ):
     findParser.set_defaults( execute = findCmdMain )
-    findParser.add_argument( '--db', required = True, action = 'append', help = 'photo database' )
+    findParser.add_argument( '--db', required = True, action = 'append',
+                             type = pathlib.Path, help = 'photo database' )
     findActionGroup = findParser.add_mutually_exclusive_group()
     findParser.set_defaults( findAction = None )
     findActionGroup.add_argument( '--print', help = 'print files and storage location',
@@ -39,26 +40,26 @@ def configureFindCommand( findParser: argparse.ArgumentParser ):
     findActionGroup.add_argument( '--print-new', help = 'print only new files',
                                   action = 'store_const', dest = 'findAction', const = printNewFindAction )
     findActionGroup.add_argument( '--move-found-to', help = 'move found files to folder',
-                                  dest = 'moveFoundTarget', default = None )
+                                  dest = 'moveFoundTarget', type = pathlib.Path, default = None )
     findActionGroup.add_argument( '--copy-new-to', help = 'copy new files to folder',
-                                  dest = 'copyNewTarget', default = None )
+                                  dest = 'copyNewTarget', type = pathlib.Path, default = None )
     findParser.add_argument( '--cached-checksums', dest = 'cachedChecksums',
-                             help = 'file with cached checksums' )
+                             type = pathlib.Path, help = 'file with cached checksums' )
     findParser.add_argument( 'FILES', nargs = argparse.REMAINDER,
-                             help = 'files or folders to find' )
+                             type = pathlib.Path, help = 'files or folders to find' )
 
 
 def findCmdMain( cmdArgs ):
     db = FileDb.FileDb()
     for dbPath in cmdArgs.db:
-        db.addIndexedTree( pathlib.Path( dbPath ) )
+        db.addIndexedTree( dbPath )
 
     action = cmdArgs.findAction
     if action is None:
         if cmdArgs.moveFoundTarget is not None:
-            action = MoveFoundFindAction( pathlib.Path( cmdArgs.moveFoundTarget ) )
+            action = MoveFoundFindAction( cmdArgs.moveFoundTarget )
         elif cmdArgs.copyNewTarget is not None:
-            action = CopyNewFindAction( pathlib.Path( cmdArgs.copyNewTarget ) )
+            action = CopyNewFindAction( cmdArgs.copyNewTarget )
         else:
             action = printFindAction
 
@@ -66,21 +67,18 @@ def findCmdMain( cmdArgs ):
                        fileTreeIterator = createFileTreeIterator( cmdArgs ) )
 
     cachedChecksums = cmdArgs.cachedChecksums
-    if cachedChecksums is not None:
-        cachedChecksums = pathlib.Path( cachedChecksums )
-
     files = cmdArgs.FILES
     if len( files ) == 0 and cachedChecksums is not None:
         cmd.processChecksumFile( cachedChecksums )
     else:
         if len( files ) == 0:
-            files = ['.']
+            files = [pathlib.Path()]
 
         if cachedChecksums is not None:
             cmd.addCachedChecksums( cachedChecksums )
 
         for filePath in files:
-            cmd.process( pathlib.Path( filePath ) )
+            cmd.process( filePath )
 
 
 class FindCommand:
@@ -213,25 +211,23 @@ def configureIndexCommand( indexParser: argparse.ArgumentParser ):
     indexActionGroup.add_argument( '--verify', help = 'verify file checksum index',
                                    action = 'store_const', dest = 'indexAction', const = 'verify' )
     indexParser.add_argument( '--checksum-file', help = 'checksum file',
-                              dest = 'checksumFile', default = None )
+                              type = pathlib.Path, dest = 'checksumFile', default = None )
     indexParser.add_argument( '--changes-mode', help = 'context changes handling mode',
                               choices = ['reject', 'review', 'accept'], default = 'reject',
                               dest = 'changesMode' )
-    indexParser.add_argument( 'FOLDERS', nargs = argparse.REMAINDER, help = 'folders to index' )
+    indexParser.add_argument( 'FOLDERS', nargs = argparse.REMAINDER,
+                              type = pathlib.Path, help = 'folders to index' )
 
 
 def indexCmdMain( cmdArgs ):
-    if cmdArgs.checksumFile is not None:
-        indexFileName = pathlib.Path( cmdArgs.checksumFile )
-    else:
-        indexFileName = None
+    indexFileName = cmdArgs.checksumFile
     folders = cmdArgs.FOLDERS
 
     if len( folders ) > 1 and indexFileName.is_absolute():
         raise ValueError( 'absolute path to checksum file is given and multiple folders specified' )
 
     if len( folders ) == 0:
-        folders = ['.']
+        folders = [pathlib.Path()]
 
     fileTreeIterator = createFileTreeIterator( cmdArgs )
 
@@ -244,7 +240,7 @@ def indexCmdMain( cmdArgs ):
     success = True
     try:
         for folder in folders:
-            indexBuilder = FileDb.IndexBuilder( folder = pathlib.Path( folder ), indexFileName = indexFileName,
+            indexBuilder = FileDb.IndexBuilder( folder = folder, indexFileName = indexFileName,
                                                 fileTreeIterator = fileTreeIterator,
                                                 create = create, verify = verify,
                                                 rejectChanges = rejectChanges, reviewChanges = reviewChanges )
