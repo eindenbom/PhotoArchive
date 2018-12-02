@@ -58,29 +58,26 @@ class FileInfo:
 
 class FileDb:
     __hashIndex: Dict[str, FileInfo]
-    __hasSHA1: bool
-    __hasSHA256: bool
+    __algorithms: List[str]
 
     def __init__( self ):
-        self.__hashIndex = { }
-        self.__hasSHA1 = False
-        self.__hasSHA256 = False
+        self.__hashIndex = dict()
+        self.__algorithms = []
 
     @property
-    def hasSHA1( self ):
-        return self.__hasSHA1
+    def algorithms( self ):
+        return self.__algorithms
 
-    @property
-    def hasSHA256( self ):
-        return self.__hasSHA256
+    def hasAlgorithm( self, algorithm: str ):
+        return algorithm in self.__algorithms
 
     def addFile( self, filePath: pathlib.Path, checksum: str ):
-        if len( checksum ) == 64:
-            self.__hasSHA256 = True
-        elif len( checksum ) == 40:
-            self.__hasSHA1 = True
-        else:
+        algorithm = detectChecksumAlgorithm( checksum )
+        if algorithm is None:
             raise ValueError( 'Unknown checksum type' )
+
+        if algorithm not in self.__algorithms:
+            self.__algorithms.append( algorithm )
 
         fileInfo = FileInfo( filePath, checksum )
         prevInfo = self.__hashIndex.get( checksum, None )
@@ -127,20 +124,27 @@ class FileDb:
         return fileInfo
 
     def __findFileInfoChain( self, filePath: pathlib.Path ):
-        if self.hasSHA256:
-            fileInfo = self.get( calculateChecksum( filePath, 'sha256' ) )
-            if fileInfo is not None:
-                return fileInfo
-
-        if self.hasSHA1:
-            fileInfo = self.get( calculateChecksum( filePath, 'sha1' ) )
+        for algorithm in self.algorithms:
+            fileInfo = self.get( calculateChecksum( filePath, algorithm ) )
             if fileInfo is not None:
                 return fileInfo
 
         return None
 
 
-def calculateChecksum( filePath: pathlib.Path, algorithm: str = 'sha256' ):
+defaultChecksumAlgorithm = 'sha256'
+
+
+def detectChecksumAlgorithm( checksum: str ):
+    if len( checksum ) == 40:
+        return 'sha1'
+    if len( checksum ) == 64:
+        return 'sha256'
+
+    return None
+
+
+def calculateChecksum( filePath: pathlib.Path, algorithm: str = defaultChecksumAlgorithm ):
     h = hashlib.new( algorithm )
     with filePath.open( mode = 'rb', buffering = False ) as file:
         while True:
@@ -409,11 +413,7 @@ class IndexBuilder:
                 self.__newCount += 1
                 print( 'n', self.__prettyFileName( filePath ) )
             else:
-                if len( reference ) == 40:
-                    refAlgorithm = 'sha1'
-                else:
-                    refAlgorithm = 'sha256'
-
+                refAlgorithm = detectChecksumAlgorithm( reference )
                 if refAlgorithm != algorithm:
                     algorithm = refAlgorithm
                     checksum = calculateChecksum( fullFilePath, algorithm )
@@ -427,8 +427,8 @@ class IndexBuilder:
         if self.__create:
             self.__openNewIndex()
 
-            if algorithm != 'sha256':
-                algorithm = 'sha256'
+            if algorithm != defaultChecksumAlgorithm:
+                algorithm = defaultChecksumAlgorithm
                 checksum = calculateChecksum( fullFilePath, algorithm )
 
             self.__newIndexWriter.write( filePath, checksum )
