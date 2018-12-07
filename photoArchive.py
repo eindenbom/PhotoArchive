@@ -237,7 +237,7 @@ def indexCmdMain( cmdArgs ):
     indexFileName = cmdArgs.checksumFile
     folders = cmdArgs.FOLDERS
 
-    if len( folders ) > 1 and indexFileName.is_absolute():
+    if len( folders ) > 1 and indexFileName is not None and indexFileName.is_absolute():
         raise ValueError( 'absolute path to checksum file is given and multiple folders specified' )
 
     if len( folders ) == 0:
