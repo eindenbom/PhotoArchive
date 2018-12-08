@@ -529,5 +529,5 @@ class IndexBuilder:
             self.__newIndexFilePath = None
             try:
                 newIndexFile.unlink()
-            except OSError:
-                print( 'Error removing {newIndexFileName}: {e}', file = stderr )
+            except OSError as e:
+                print( f'Error removing {newIndexFile}: {e}', file = stderr )
