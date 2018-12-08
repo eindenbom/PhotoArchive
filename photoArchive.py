@@ -11,13 +11,19 @@ import FileDb
 
 def main():
     parser = argparse.ArgumentParser( description = 'Photo archive tool' )
-    commands = parser.add_subparsers( required = True, help = 'available commands' )
+    commands = parser.add_subparsers( help = 'available commands' )
+    parser.set_defaults( execute = None )
 
     configureFindCommand( commands.add_parser( 'find' ) )
     configureIndexCommand( commands.add_parser( 'index' ) )
 
     cmdArgs = parser.parse_args()
-    return cmdArgs.execute( cmdArgs )
+
+    execute = cmdArgs.execute
+    if execute is None:
+        parser.error( 'No command is given.' )
+
+    return execute( cmdArgs )
 
 
 def createFileTreeIterator( _cmdArgs ):
