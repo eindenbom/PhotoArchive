@@ -147,12 +147,16 @@ def detectChecksumAlgorithm( checksum: str ):
 def calculateChecksum( filePath: pathlib.Path, algorithm: str = defaultChecksumAlgorithm ):
     h = hashlib.new( algorithm )
     with filePath.open( mode = 'rb', buffering = False ) as file:
-        while True:
-            data = file.read( 0x10000 )
-            if len( data ) == 0:
-                break
+        try:
+            while True:
+                data = file.read( 0x10000 )
+                if len( data ) == 0:
+                    break
 
-            h.update( data )
+                h.update( data )
+        except IOError as e:
+            e.filename = str( filePath )
+            raise
 
         file.close()
 
