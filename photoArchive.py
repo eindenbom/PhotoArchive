@@ -41,15 +41,13 @@ def configureFindCommand( findParser: argparse.ArgumentParser ):
     findParser.add_argument( '--db', required = True, action = 'append',
                              type = pathlib.Path, help = 'photo database' )
     findActionGroup = findParser.add_mutually_exclusive_group()
-    findParser.set_defaults( findAction = None )
     findActionGroup.add_argument( '--print', help = 'print files and storage location',
-                                  action = 'store_const', dest = 'findAction', const = printFindAction )
-    findActionGroup.add_argument( '--print-new', help = 'print only new files',
-                                  action = 'store_const', dest = 'findAction', const = printNewFindAction )
-    findActionGroup.add_argument( '--move-found-to', help = 'move found files to folder',
-                                  dest = 'moveFoundTarget', type = pathlib.Path, default = None )
-    findActionGroup.add_argument( '--copy-new-to', help = 'copy new files to folder',
-                                  dest = 'copyNewTarget', type = pathlib.Path, default = None )
+                                  action = 'store_true' )
+    findActionGroup.add_argument( '--move-to', help = 'move found files to folder',
+                                  dest = 'moveTarget', type = pathlib.Path, default = None )
+    findActionGroup.add_argument( '--copy-to', help = 'copy new files to folder',
+                                  dest = 'copyTarget', type = pathlib.Path, default = None )
+    findParser.add_argument( '--new', action = 'store_true', help = 'process new files (not found in database)' )
     findParser.add_argument( '--cached-checksums', dest = 'cachedChecksums',
                              type = pathlib.Path, help = 'file with cached checksums' )
     findParser.add_argument( '--cached-checksums-root', dest = 'cachedChecksumsRoot',
@@ -63,14 +61,16 @@ def findCmdMain( cmdArgs ):
     for dbPath in cmdArgs.db:
         db.addIndexedTree( dbPath )
 
-    action = cmdArgs.findAction
-    if action is None:
-        if cmdArgs.moveFoundTarget is not None:
-            action = MoveFoundFindAction( cmdArgs.moveFoundTarget )
-        elif cmdArgs.copyNewTarget is not None:
-            action = CopyNewFindAction( cmdArgs.copyNewTarget )
-        else:
-            action = printFindAction
+    processNew = cmdArgs.new
+
+    if cmdArgs.moveTarget is not None:
+        action = CopyFindAction( target = cmdArgs.moveTarget, move = True, new = processNew )
+    elif cmdArgs.copyTarget is not None:
+        action = CopyFindAction( target = cmdArgs.copyTarget, move = False, new = processNew )
+    elif processNew:
+        action = printNewFindAction
+    else:
+        action = printFindAction
 
     cmd = FindCommand( action = action, db = db,
                        fileTreeIterator = createFileTreeIterator( cmdArgs ) )
@@ -177,48 +177,40 @@ class MkDirCache:
         self.__cache.add( path )
 
 
-class MoveFoundFindAction:
-    __sourceDirs: Set[pathlib.Path]
-
-    def __init__( self, target: pathlib.Path ):
+class CopyFindAction:
+    def __init__( self, *, target: pathlib.Path, move: bool, new: bool ):
         self.__target = target
+        self.__move = move
+        self.__new = new
         self.__dirCache = MkDirCache()
 
     def __call__( self, basePath: pathlib.Path, filePath: pathlib.Path, fileInfo: FileDb.FileInfo ):
-        if fileInfo is None:
-            return
+        if fileInfo is not None:
+            if self.__new:
+                return
 
-        targetPath = self.__target.joinpath( fileInfo.filePath )
-        if filePath.name.lower() != targetPath.name.lower():
-            print( f"skipping {filePath}, target name mismatch ({targetPath.name})" )
-            return
+            targetPath = self.__target.joinpath( fileInfo.filePath )
+            if filePath.name.lower() != targetPath.name.lower():
+                print( f"skipping {filePath}, target name mismatch ({targetPath.name})" )
+                return
+
+        else:
+            if not self.__new:
+                return
+
+            targetPath = self.__target.joinpath( filePath )
 
         self.__dirCache.mkdir( targetPath.parent )
         if targetPath.exists():
             print( f"skipping {filePath}, target ({targetPath.name}) already exists" )
             return
 
-        filePath.rename( targetPath )
-
-
-class CopyNewFindAction:
-    def __init__( self, target: pathlib.Path ):
-        self.__target = target
-        self.__dirCache = MkDirCache()
-
-    def __call__( self, basePath: pathlib.Path, filePath: pathlib.Path, fileInfo: FileDb.FileInfo ):
-        if fileInfo is not None:
-            return
-
-        targetPath = self.__target.joinpath( filePath.relative_to( basePath ) )
-
-        self.__dirCache.mkdir( targetPath.parent )
-        if targetPath.exists():
-            print( f"skipping {filePath}, target ({targetPath}) already exists" )
-            return
-
-        # noinspection PyTypeChecker
-        shutil.copy2( filePath, targetPath )
+        sourcePath = basePath.joinpath( filePath )
+        if self.__move:
+            sourcePath.rename( targetPath )
+        else:
+            # noinspection PyTypeChecker
+            shutil.copy2( sourcePath, targetPath )
 
 
 def configureIndexCommand( indexParser: argparse.ArgumentParser ):
