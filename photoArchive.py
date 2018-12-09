@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 import argparse
 import pathlib
@@ -28,7 +29,7 @@ def main():
 
 def createFileTreeIterator( _cmdArgs ):
     iterator = FileDb.FileTreeIterator()
-    iterator.addExcluded( '*.sha[12]', 'Thumbs.db' )
+    iterator.addExcluded( '*.sha[12]', 'Thumbs.db', '@*' )
     return iterator
 
 

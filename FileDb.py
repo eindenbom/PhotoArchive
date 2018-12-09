@@ -183,10 +183,12 @@ class FileTreeIterator:
             if sortFolders:
                 dirIterator = sorted( dirIterator, key = lambda x: x.name.lower() )
             for dirEntry in dirIterator:
+                if not self.__checkName( dirEntry.name ):
+                    continue
                 filePath = subdir.joinpath( dirEntry.name )
                 if dirEntry.is_dir():
                     subdirQueue.append( filePath )
-                elif self.__checkName( dirEntry.name ):
+                else:
                     yield filePath
 
             if len( subdirQueue ) == 0:
