@@ -12,15 +12,17 @@ from typing import Dict, List, Optional, Pattern, Union
 
 
 class FileInfo:
-    __slots__ = ["__filePath", "__checksum", "__duplicate"]
+    __slots__ = ["__filePath", "__checksum", "__duplicate", "__id"]
 
     __filePath: pathlib.Path
     __checksum: str
+    __id: int
     __duplicate: "FileInfo"
 
-    def __init__( self, filePath: pathlib.Path, checksum: str ):
+    def __init__( self, filePath: pathlib.Path, checksum: str, id: int ):
         self.__filePath = filePath
         self.__checksum = checksum
+        self.__id = id
         self.__duplicate = None
 
     @property
@@ -30,6 +32,10 @@ class FileInfo:
     @property
     def checksum( self ):
         return self.__checksum
+
+    @property
+    def id( self ):
+        return self.__id
 
     @property
     def duplicate( self ):
@@ -62,6 +68,7 @@ class FileDb:
 
     def __init__( self ):
         self.__hashIndex = dict()
+        self.__nextId = 0
         self.__algorithms = []
 
     @property
@@ -79,7 +86,7 @@ class FileDb:
         if algorithm not in self.__algorithms:
             self.__algorithms.append( algorithm )
 
-        fileInfo = FileInfo( filePath, checksum )
+        fileInfo = FileInfo( filePath, checksum, self.__nextId )
         prevInfo = self.__hashIndex.get( checksum, None )
         if prevInfo is None:
             self.__hashIndex[checksum] = fileInfo
@@ -89,6 +96,8 @@ class FileDb:
 
             prevInfo.duplicate = fileInfo
 
+        self.__nextId += 1
+
     def addChecksumFile( self, basePath: Optional[pathlib.Path], fileName: pathlib.Path ):
         with ChecksumFileReader( fileName ) as reader:
             for fp, c in reader:
@@ -97,8 +106,10 @@ class FileDb:
 
                 self.addFile( fp, c )
 
-    def addIndexedTree( self, basePath: pathlib.Path ):
-        self.__addIndexedTree( basePath, pathlib.Path() )
+    def addIndexedTree( self, basePath: pathlib.Path, relativePath: pathlib.Path = None ):
+        if relativePath is None:
+            relativePath = pathlib.Path()
+        self.__addIndexedTree( basePath, relativePath )
 
     def __addIndexedTree( self, basePath: pathlib.Path, relativePath: pathlib.Path ):
         folderPath = basePath.joinpath( relativePath )
@@ -130,6 +141,9 @@ class FileDb:
                 return fileInfo
 
         return None
+
+    def entries( self ):
+        return self.__hashIndex.items()
 
 
 defaultChecksumAlgorithm = 'sha256'

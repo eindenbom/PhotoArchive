@@ -15,8 +15,10 @@ def main():
     commands = parser.add_subparsers( help = 'available commands' )
     parser.set_defaults( execute = None )
 
-    configureFindCommand( commands.add_parser( 'find' ) )
-    configureIndexCommand( commands.add_parser( 'index' ) )
+    configureFindCommand( commands.add_parser( 'find', help = 'lookup file tree in photo database' ) )
+    configureIndexCommand( commands.add_parser( 'index', help = 'create or verify photo database index' ) )
+    configureCheckDuplicatesCommand( commands.add_parser(
+        'check-duplicates', help = 'check that files with identical checksums are identical' ) )
 
     cmdArgs = parser.parse_args()
 
@@ -266,6 +268,62 @@ def indexCmdMain( cmdArgs ):
         return 2
 
     return 0 if success else 1
+
+
+def configureCheckDuplicatesCommand( indexParser: argparse.ArgumentParser ):
+    indexParser.set_defaults( execute = checkDuplicatesCmdMain )
+    indexParser.add_argument( '--storage-base', help = 'base path of indexed file storage',
+                              type = pathlib.Path, dest = 'storageBase', default = None )
+    indexParser.add_argument( 'FOLDERS', nargs = argparse.REMAINDER,
+                              type = pathlib.Path, help = 'photo database root folders' )
+
+
+def checkDuplicatesCmdMain( cmdArgs ):
+    folders = cmdArgs.FOLDERS
+
+    db = FileDb.FileDb()
+    for dbPath in folders:
+        db.addIndexedTree( pathlib.Path(), dbPath )
+
+    storageBase = cmdArgs.storageBase
+
+    duplicates = list()
+    for _, fileInfo in db.entries():
+        if fileInfo.duplicate is not None:
+            duplicates.append( fileInfo )
+
+    success = True
+    for fileInfo in sorted( duplicates, key = lambda x: x.id ):
+        duplicate = fileInfo.duplicate
+        while duplicate is not None:
+            if not checkDuplicates( storageBase, fileInfo, duplicate ):
+                success = False
+                print( f"'{fileInfo.filePath}' and '{duplicate.filePath}' are binary different" )
+            duplicate = duplicate.duplicate
+
+    return 0 if success else 1
+
+
+def checkDuplicates( storageBase: Optional[pathlib.Path], fileInfo: FileDb.FileInfo, duplicate: FileDb.FileInfo ):
+    srcPath = fileInfo.filePath
+    dstPath = duplicate.filePath
+    if storageBase is not None:
+        srcPath = storageBase.joinpath( srcPath )
+        dstPath = storageBase.joinpath( dstPath )
+
+    chunkSize = 0x10000
+    with srcPath.open( mode = 'rb' ) as src:
+        with dstPath.open( mode = 'rb' ) as dst:
+            while True:
+                sd = src.read( chunkSize )
+                dd = dst.read( chunkSize )
+                if sd != dd:
+                    return False
+
+                if len( sd ) == 0:
+                    break
+
+    return True
 
 
 if __name__ == "__main__":
