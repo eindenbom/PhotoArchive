@@ -5,7 +5,7 @@ import pathlib
 import shutil
 import stat
 from sys import stderr
-from typing import Callable, Set, Dict, Optional
+from typing import Callable, Set, Dict, Optional, List
 
 import FileDb
 
@@ -19,6 +19,8 @@ def main():
     configureIndexCommand( commands.add_parser( 'index', help = 'create or verify photo database index' ) )
     configureCheckDuplicatesCommand( commands.add_parser(
         'check-duplicates', help = 'check that files with identical checksums are identical' ) )
+    configureRestoreCommand( commands.add_parser(
+        'restore', help = 'restore files in indexed location from another database' ) )
 
     cmdArgs = parser.parse_args()
 
@@ -280,6 +282,8 @@ def configureCheckDuplicatesCommand( indexParser: argparse.ArgumentParser ):
 
 def checkDuplicatesCmdMain( cmdArgs ):
     folders = cmdArgs.FOLDERS
+    if len( folders ) == 0:
+        folders = [pathlib.Path()]
 
     db = FileDb.FileDb()
     for dbPath in folders:
@@ -324,6 +328,91 @@ def checkDuplicates( storageBase: Optional[pathlib.Path], fileInfo: FileDb.FileI
                     break
 
     return True
+
+
+def configureRestoreCommand( restoreParser: argparse.ArgumentParser ):
+    restoreParser.set_defaults( execute = restoreCmdMain )
+    restoreParser.add_argument( '--db', required = True, action = 'append',
+                                type = pathlib.Path, help = 'photo database' )
+    restoreParser.add_argument( '--db-storage', help = 'path to storage of indexed files',
+                                type = pathlib.Path, dest = 'dbStorage', default = None )
+    restoreParser.add_argument( '--checksum-file', help = 'checksum file',
+                                type = pathlib.Path, dest = 'checksumFile', default = None )
+    restoreParser.add_argument( '--skip-existing', help = 'skip files already in restored folder',
+                                dest = 'skipExisting', action = 'store_true' )
+    restoreParser.add_argument( 'FOLDERS', nargs = argparse.REMAINDER,
+                                type = pathlib.Path, help = 'folders to restore from database' )
+
+
+def restoreCmdMain( cmdArgs ):
+    db = FileDb.FileDb()
+    for dbPath in cmdArgs.db:
+        db.addIndexedTree( pathlib.Path(), dbPath )
+
+    restoreCmd = RestoreCommand( db = db,
+                                 dbStorage = cmdArgs.dbStorage,
+                                 checksumFile = cmdArgs.checksumFile,
+                                 skipExisting = cmdArgs.skipExisting )
+
+    folders = cmdArgs.FOLDERS
+    if len( folders ) == 0:
+        folders = [pathlib.Path()]
+
+    success = restoreCmd.process( folders )
+
+    return 0 if success else 1
+
+
+class RestoreCommand:
+    def __init__( self, *, db: FileDb.FileDb, dbStorage = Optional[pathlib.Path],
+                  checksumFile: Optional[pathlib.Path], skipExisting: bool ):
+        self.__db = db
+
+        if dbStorage is None:
+            dbStorage = pathlib.Path()
+        self.__dbStorage = dbStorage
+
+        if checksumFile is None:
+            checksumFile = pathlib.Path( 'Checksums.sha2' )
+        self.__checksumFile = checksumFile
+
+        self.__skipExisting = skipExisting
+        self.__mkdirCache = MkDirCache()
+
+    def process( self, folders: List[pathlib.Path] ):
+        success = True
+        for folder in folders:
+            with FileDb.ChecksumFileReader( folder.joinpath( self.__checksumFile ) ) as reader:
+                for filePath, cs in reader:
+                    if not self.__restoreFile( cs, folder, filePath ):
+                        success = False
+
+        return success
+
+    def __restoreFile( self, cs: str, basePath: pathlib.Path, filePath: pathlib.Path ):
+        fileInfo = self.__db.get( cs )
+        if fileInfo is None:
+            print( f"'{filePath}' is not found in database", file = stderr )
+            return False
+
+        fileInfo = fileInfo.findBestMatch( filePath )
+
+        fullPath = basePath.joinpath( filePath )
+        self.__mkdirCache.mkdir( fullPath.parent )
+
+        if fullPath.exists():
+            if self.__skipExisting:
+                return True
+            else:
+                print( f"'{filePath}' already exists", file = stderr )
+                return False
+
+        srcPath = fileInfo.filePath
+        if self.__dbStorage is not None:
+            srcPath = self.__dbStorage.joinpath( srcPath )
+
+        # noinspection PyTypeChecker
+        shutil.copy2( srcPath, fullPath )
 
 
 if __name__ == "__main__":
