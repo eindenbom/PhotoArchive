@@ -201,7 +201,7 @@ class FileTreeIterator:
                     yield filePath
                 else:
                     iteratorStack.append( iterator )
-                    iterator = self.__scanDir( filePath )
+                    iterator = self.__scanDir( basePath.joinpath( filePath ) )
                     subdir = filePath
 
             except StopIteration:
