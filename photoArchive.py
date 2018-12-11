@@ -119,7 +119,7 @@ class FindCommand:
         if not stat.S_ISDIR( s.st_mode ):
             self.processFile( filePath.parent, filePath )
         else:
-            for relativePath in self.__fileTreeIterator.iterate( filePath, sortFolders = True ):
+            for relativePath in self.__fileTreeIterator.iterate( filePath ):
                 self.processFile( filePath, relativePath )
 
     def processFile( self, basePath: pathlib.Path, filePath: pathlib.Path ):

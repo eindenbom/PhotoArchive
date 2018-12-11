@@ -4,7 +4,6 @@ import hashlib
 import pathlib
 import re
 import secrets
-from collections import deque
 from os import scandir
 from sys import stderr
 from time import strftime
@@ -19,6 +18,7 @@ class FileInfo:
     __id: int
     __duplicate: "FileInfo"
 
+    # noinspection PyShadowingBuiltins
     def __init__( self, filePath: pathlib.Path, checksum: str, id: int ):
         self.__filePath = filePath
         self.__checksum = checksum
@@ -189,26 +189,32 @@ class FileTreeIterator:
                 re.compile( fnmatch.translate( g ),
                             re.RegexFlag.IGNORECASE | re.RegexFlag.DOTALL ) )
 
-    def iterate( self, basePath: pathlib.Path, *, sortFolders: bool = False ):
-        subdirQueue = deque()
+    def iterate( self, basePath: pathlib.Path ):
+        iteratorStack = list()
         subdir = pathlib.Path()
+        iterator = self.__scanDir( basePath )
         while True:
-            dirIterator = scandir( basePath.joinpath( subdir ) )
-            if sortFolders:
-                dirIterator = sorted( dirIterator, key = lambda x: x.name.lower() )
-            for dirEntry in dirIterator:
-                if not self.__checkName( dirEntry.name ):
-                    continue
-                filePath = subdir.joinpath( dirEntry.name )
-                if dirEntry.is_dir():
-                    subdirQueue.append( filePath )
-                else:
+            try:
+                entry = next( iterator )
+                filePath = subdir.joinpath( entry.name )
+                if not entry.is_dir():
                     yield filePath
+                else:
+                    iteratorStack.append( iterator )
+                    iterator = self.__scanDir( filePath )
+                    subdir = filePath
 
-            if len( subdirQueue ) == 0:
-                break
+            except StopIteration:
+                if len( iteratorStack ) == 0:
+                    break
 
-            subdir = subdirQueue.popleft()
+                subdir = subdir.parent
+                iterator = iteratorStack.pop()
+
+    def __scanDir( self, folder: pathlib.Path ):
+        return iter( sorted(
+            filter( lambda x: self.__checkName( x.name ),
+                    scandir( folder ) ), key = lambda x: x.name.lower() ) )
 
     def __checkName( self, name: str ):
         for e in self.__excluded:
