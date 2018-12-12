@@ -1,11 +1,13 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
 import argparse
+import fnmatch
 import pathlib
+import re
 import shutil
 import stat
 from sys import stderr
-from typing import Callable, Set, Dict, Optional, List
+from typing import Callable, Set, Dict, Optional, List, Pattern
 
 import FileDb
 
@@ -56,6 +58,8 @@ def configureFindCommand( findParser: argparse.ArgumentParser ):
                              type = pathlib.Path, help = 'file with cached checksums' )
     findParser.add_argument( '--cached-checksums-root', dest = 'cachedChecksumsRoot',
                              type = pathlib.Path, help = 'file with cached checksums' )
+    findParser.add_argument( '--excluded-list', dest = 'excludedList',
+                             type = pathlib.Path, help = 'file with excluded paths and patterns' )
     findParser.add_argument( 'FILES', nargs = argparse.REMAINDER,
                              type = pathlib.Path, help = 'files or folders to find' )
 
@@ -79,6 +83,9 @@ def findCmdMain( cmdArgs ):
     cmd = FindCommand( action = action, db = db,
                        fileTreeIterator = createFileTreeIterator( cmdArgs ) )
 
+    if cmdArgs.excludedList is not None:
+        cmd.addExcludedList( cmdArgs.excludedList )
+
     cachedChecksums = cmdArgs.cachedChecksums
     files = cmdArgs.FILES
     if len( files ) == 0 and cachedChecksums is not None:
@@ -96,12 +103,18 @@ def findCmdMain( cmdArgs ):
 
 class FindCommand:
     __cachedChecksums: Dict[pathlib.Path, str]
+    __excludedPatterns: List[Pattern]
+    __excludedFiles: Set[pathlib.Path]
+    __excludedPaths: Set[pathlib.Path]
 
     def __init__( self, *, action: FindActionType, db: FileDb.FileDb, fileTreeIterator: FileDb.FileTreeIterator ):
         self.__db = db
         self.__action = action
         self.__fileTreeIterator = fileTreeIterator
         self.__cachedChecksums = dict()
+        self.__excludedPatterns = list()
+        self.__excludedFiles = set()
+        self.__excludedPaths = set()
 
     def addCachedChecksums( self, checksumFile: pathlib.Path, filterPath: Optional[pathlib.Path] ):
         with FileDb.ChecksumFileReader( checksumFile ) as reader:
@@ -114,6 +127,33 @@ class FindCommand:
 
                 self.__cachedChecksums[fp] = c
 
+    def addExcludedList( self, listFileName ):
+        empty = pathlib.Path()
+        with open( listFileName, mode = 'rt', encoding = 'utf-8-sig' ) as file:
+            while True:
+                l = file.readline()
+                if len( l ) == 0:
+                    break
+
+                l = l.rstrip( '\r\n' )
+                if len( l ) == 0:
+                    continue
+
+                path = pathlib.Path( l )
+                if path == empty:
+                    continue
+
+                if (not '/' in l) and (not '\\' in l):
+                    # Только имя файла - это исключающий шаблон
+                    self.__excludedPatterns.append( re.compile(
+                        fnmatch.translate( path.name ), re.RegexFlag.IGNORECASE | re.RegexFlag.DOTALL ) )
+                elif l.endswith( '/' ) or l.endswith( '\\' ):
+                    # префикс пути
+                    self.__excludedPaths.add( path )
+                else:
+                    # точное имя файла
+                    self.__excludedFiles.add( path )
+
     def process( self, filePath: pathlib.Path ):
         s = filePath.stat()
         if not stat.S_ISDIR( s.st_mode ):
@@ -122,8 +162,26 @@ class FindCommand:
             for relativePath in self.__fileTreeIterator.iterate( filePath ):
                 self.processFile( filePath, relativePath )
 
+    def isExcluded( self, filePath: pathlib.Path ):
+        if filePath in self.__excludedFiles:
+            return True
+
+        excludedPaths = self.__excludedPaths
+        if len( excludedPaths ) > 0:
+            for p in filePath.parents:
+                if p in excludedPaths:
+                    return True
+
+        name = filePath.name
+        for p in self.__excludedPatterns:
+            if p.match( name ):
+                return True
+
+        return False
+
     def processFile( self, basePath: pathlib.Path, filePath: pathlib.Path ):
-        self.__action( basePath, filePath, self.__findFile( basePath, filePath ) )
+        if not self.isExcluded( filePath ):
+            self.__action( basePath, filePath, self.__findFile( basePath, filePath ) )
 
     def processChecksumFile( self, cachedChecksums: pathlib.Path, filterPath: Optional[pathlib.Path] ):
         with FileDb.ChecksumFileReader( cachedChecksums ) as reader:
@@ -135,7 +193,8 @@ class FindCommand:
                     except ValueError:
                         continue
 
-                self.__action( basePath, fp, self.__findFileByChecksum( fp, c ) )
+                if not self.isExcluded( fp ):
+                    self.__action( basePath, fp, self.__findFileByChecksum( fp, c ) )
 
     def __findFile( self, basePath: pathlib.Path, filePath: pathlib.Path ):
         cachedChecksum = self.__cachedChecksums.get( filePath, None )
