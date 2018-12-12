@@ -54,6 +54,8 @@ def configureFindCommand( findParser: argparse.ArgumentParser ):
     findActionGroup.add_argument( '--copy-to', help = 'copy new files to folder',
                                   dest = 'copyTarget', type = pathlib.Path, default = None )
     findParser.add_argument( '--new', action = 'store_true', help = 'process new files (not found in database)' )
+    findParser.add_argument( '--ignore-renames', action = 'store_true',
+                             dest='ignoreRenames', help = 'do not print renamed files' )
     findParser.add_argument( '--cached-checksums', dest = 'cachedChecksums',
                              type = pathlib.Path, help = 'file with cached checksums' )
     findParser.add_argument( '--cached-checksums-root', dest = 'cachedChecksumsRoot',
@@ -76,7 +78,7 @@ def findCmdMain( cmdArgs ):
     elif cmdArgs.copyTarget is not None:
         action = CopyFindAction( target = cmdArgs.copyTarget, move = False, new = processNew )
     elif processNew:
-        action = printNewFindAction
+        action = printOnlyNewFindAction if cmdArgs.ignoreRenames else printNewFindAction
     else:
         action = printFindAction
 
@@ -222,6 +224,10 @@ def printFindAction( _basePath: pathlib.Path, filePath: pathlib.Path, fileInfo: 
 def printNewFindAction( _basePath: pathlib.Path, filePath: pathlib.Path, fileInfo: FileDb.FileInfo ):
     if fileInfo is not None and fileInfo.filePath.name.lower() != filePath.name.lower():
         print( f"{filePath} {fileInfo.filePath}" )
+    if fileInfo is None:
+        print( filePath )
+
+def printOnlyNewFindAction( _basePath: pathlib.Path, filePath: pathlib.Path, fileInfo: FileDb.FileInfo ):
     if fileInfo is None:
         print( filePath )
 
