@@ -59,7 +59,7 @@ def configureFindCommand( findParser: argparse.ArgumentParser ):
     findParser.add_argument( '--cached-checksums', dest = 'cachedChecksums',
                              type = pathlib.Path, help = 'file with cached checksums' )
     findParser.add_argument( '--cached-checksums-root', dest = 'cachedChecksumsRoot',
-                             type = pathlib.Path, help = 'file with cached checksums' )
+                             type = pathlib.Path, help = 'path prefix to remove from cached checksums' )
     findParser.add_argument( '--excluded-list', dest = 'excludedList',
                              type = pathlib.Path, help = 'file with excluded paths and patterns' )
     findParser.add_argument( 'FILES', nargs = argparse.REMAINDER,
