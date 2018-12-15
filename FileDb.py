@@ -307,7 +307,8 @@ class IndexBuilder:
     def __init__( self, *, folder: pathlib.Path, fileTreeIterator: FileTreeIterator,
                   create: bool = False, verify: False,
                   indexFileName: Optional[pathlib.Path] = None,
-                  rejectChanges: bool = True, reviewChanges: bool = True ):
+                  rejectChanges: bool = True, reviewChanges: bool = True,
+                  reuseChecksums: bool = False ):
         self.__fileTreeIterator = fileTreeIterator
         self.__indexFileName = indexFileName
         self.__basePath = folder
@@ -317,6 +318,7 @@ class IndexBuilder:
 
         self.__rejectChanges = rejectChanges
         self.__reviewChanges = reviewChanges
+        self.__reuseChecksums = reuseChecksums
 
         self.__newIndexFilePath = None
         self.__newIndexWriter = None
@@ -440,15 +442,19 @@ class IndexBuilder:
                 print( 'n', self.__prettyFileName( filePath ) )
             else:
                 refAlgorithm = detectChecksumAlgorithm( reference )
-                if refAlgorithm != algorithm:
+                if self.__reuseChecksums:
                     algorithm = refAlgorithm
-                    checksum = calculateChecksum( fullFilePath, algorithm )
+                    checksum = reference
+                else:
+                    if refAlgorithm != algorithm:
+                        algorithm = refAlgorithm
+                        checksum = calculateChecksum( fullFilePath, algorithm )
 
-                if checksum != reference:
-                    self.__damagedCount += 1
-                    print( 'd', self.__prettyFileName( filePath ) )
-                    if self.__rejectChanges:
-                        self.__raiseValidationError()
+                    if checksum != reference:
+                        self.__damagedCount += 1
+                        print( 'd', self.__prettyFileName( filePath ) )
+                        if self.__rejectChanges:
+                            self.__raiseValidationError()
 
         if self.__create:
             self.__openNewIndex()

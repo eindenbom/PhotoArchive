@@ -55,7 +55,7 @@ def configureFindCommand( findParser: argparse.ArgumentParser ):
                                   dest = 'copyTarget', type = pathlib.Path, default = None )
     findParser.add_argument( '--new', action = 'store_true', help = 'process new files (not found in database)' )
     findParser.add_argument( '--ignore-renames', action = 'store_true',
-                             dest='ignoreRenames', help = 'do not print renamed files' )
+                             dest = 'ignoreRenames', help = 'do not print renamed files' )
     findParser.add_argument( '--cached-checksums', dest = 'cachedChecksums',
                              type = pathlib.Path, help = 'file with cached checksums' )
     findParser.add_argument( '--cached-checksums-root', dest = 'cachedChecksumsRoot',
@@ -227,6 +227,7 @@ def printNewFindAction( _basePath: pathlib.Path, filePath: pathlib.Path, fileInf
     if fileInfo is None:
         print( filePath )
 
+
 def printOnlyNewFindAction( _basePath: pathlib.Path, filePath: pathlib.Path, fileInfo: FileDb.FileInfo ):
     if fileInfo is None:
         print( filePath )
@@ -297,6 +298,8 @@ def configureIndexCommand( indexParser: argparse.ArgumentParser ):
     indexParser.add_argument( '--changes-mode', help = 'context changes handling mode',
                               choices = ['reject', 'review', 'accept'], default = 'reject',
                               dest = 'changesMode' )
+    indexParser.add_argument( '--reuse-checksums', help = 'do not recalculate checksums for files already in index',
+                              action = 'store_true', dest = 'reuseChecksums' )
     indexParser.add_argument( 'FOLDERS', nargs = argparse.REMAINDER,
                               type = pathlib.Path, help = 'folders to index' )
 
@@ -325,7 +328,8 @@ def indexCmdMain( cmdArgs ):
             indexBuilder = FileDb.IndexBuilder( folder = folder, indexFileName = indexFileName,
                                                 fileTreeIterator = fileTreeIterator,
                                                 create = create, verify = verify,
-                                                rejectChanges = rejectChanges, reviewChanges = reviewChanges )
+                                                rejectChanges = rejectChanges, reviewChanges = reviewChanges,
+                                                reuseChecksums = cmdArgs.reuseChecksums )
 
             if not indexBuilder.run():
                 success = False
